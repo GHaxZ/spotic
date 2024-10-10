@@ -1,31 +1,32 @@
 use anyhow::{anyhow, Context, Result};
-use inquire::{Password, Text};
-use std::{fs, path::PathBuf};
+use inquire::{Password, PasswordDisplayMode, Text};
+use rspotify::{scopes, Credentials};
+use std::{collections::HashSet, fs, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub struct Credentials {
+pub struct Tokens {
     refresh_token: String,
     auth_token: String,
     expires: u64,
 }
 
-impl Credentials {
+impl Tokens {
     // Load saved credentials
     pub fn load() -> Result<Self> {
         let path = Self::storage_path();
 
         if Self::saved() {
             let cred_str =
-                fs::read_to_string(&path).context("Failed reading stored credentials")?;
+                fs::read_to_string(&path).context("Failed reading stored auth tokens")?;
 
-            let cred = serde_json::from_str::<Credentials>(&cred_str)
-                .context("Failed deserializing credentials")?;
+            let cred = serde_json::from_str::<Tokens>(&cred_str)
+                .context("Failed deserializing auth tokens")?;
 
             Ok(cred)
         } else {
-            Err(anyhow!("No stored credentials were found"))
+            Err(anyhow!("No stored auth tokens were found"))
         }
     }
 
@@ -33,11 +34,11 @@ impl Credentials {
     pub fn save(&self) -> Result<()> {
         let path = Self::storage_path();
 
-        let creds = serde_json::to_string(self).context("Failed serializing credentials")?;
+        let creds = serde_json::to_string(self).context("Failed serializing auth tokens")?;
 
         Self::ensure_dir()?;
 
-        fs::write(&path, creds).context("Failed writing credentials to file")?;
+        fs::write(&path, creds).context("Failed writing auth tokens to file")?;
 
         Ok(())
     }
@@ -69,7 +70,7 @@ pub struct TokenProvider {}
 
 impl TokenProvider {
     // Get a new token provider
-    pub fn new(credentials: Credentials) -> Self {
+    pub fn new(credentials: Tokens) -> Self {
         Self {}
     }
 
@@ -79,11 +80,6 @@ impl TokenProvider {
     }
 }
 
-pub struct ClientCredentials {
-    client_id: String,
-    client_secret: String,
-}
-
 pub struct AuthFlow {}
 
 impl AuthFlow {
@@ -91,13 +87,17 @@ impl AuthFlow {
         Self {}
     }
 
+    pub fn scopes() -> HashSet<String> {
+        scopes!("user-read-currently-playing")
+    }
+
     pub fn run(&self) -> Result<()> {
-        self.collect_creds()?;
+        let creds = self.collect_creds()?;
 
         Ok(())
     }
 
-    pub fn collect_creds(&self) -> Result<ClientCredentials> {
+    pub fn collect_creds(&self) -> Result<rspotify::Credentials> {
         println!(
 "To authorize this tool you need to provide client credentials.
 
@@ -118,12 +118,12 @@ To get these credentials go to the Spotify Developer Dashboard: https://develope
             .prompt()
             .context("Failed reading client id input")?;
         let client_secret = Password::new("Enter the client secret")
+            .with_display_toggle_enabled()
+            .without_confirmation()
+            .with_display_mode(PasswordDisplayMode::Masked)
             .prompt()
             .context("Failed reading client secret input")?;
 
-        Ok(ClientCredentials {
-            client_id,
-            client_secret,
-        })
+        Ok(Credentials::new(&client_id, &client_secret))
     }
 }
