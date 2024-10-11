@@ -1,9 +1,17 @@
+use rspotify::AuthCodePkceSpotify;
+
 use crate::model::Track;
 
 // Used to control the spotify player
-pub struct SpotifyPlayer {}
+pub struct SpotifyPlayer {
+    client: AuthCodePkceSpotify,
+}
 
 impl SpotifyPlayer {
+    pub fn new(client: AuthCodePkceSpotify) -> Self {
+        Self { client }
+    }
+
     pub fn current_track() -> Option<Track> {
         None
     }

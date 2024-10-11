@@ -1,103 +1,54 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use inquire::{Password, PasswordDisplayMode, Text};
-use rspotify::{scopes, Credentials};
-use std::{collections::HashSet, fs, path::PathBuf};
+use rspotify::{prelude::OAuthClient, scopes, AuthCodePkceSpotify, Config, Credentials, OAuth};
+use std::collections::HashSet;
 
-use serde::{Deserialize, Serialize};
+use crate::client::SpotifyPlayer;
 
-#[derive(Serialize, Deserialize)]
-pub struct Tokens {
-    refresh_token: String,
-    auth_token: String,
-    expires: u64,
-}
-
-impl Tokens {
-    // Load saved credentials
-    pub fn load() -> Result<Self> {
-        let path = Self::storage_path();
-
-        if Self::saved() {
-            let cred_str =
-                fs::read_to_string(&path).context("Failed reading stored auth tokens")?;
-
-            let cred = serde_json::from_str::<Tokens>(&cred_str)
-                .context("Failed deserializing auth tokens")?;
-
-            Ok(cred)
-        } else {
-            Err(anyhow!("No stored auth tokens were found"))
-        }
-    }
-
-    // Save this credential set to file
-    pub fn save(&self) -> Result<()> {
-        let path = Self::storage_path();
-
-        let creds = serde_json::to_string(self).context("Failed serializing auth tokens")?;
-
-        Self::ensure_dir()?;
-
-        fs::write(&path, creds).context("Failed writing auth tokens to file")?;
-
-        Ok(())
-    }
-
-    // Ensure the data directory is created
-    pub fn ensure_dir() -> Result<()> {
-        fs::create_dir_all(Self::storage_path()).context("Failed creating data directory")
-    }
-
-    // Do saved credentials exist
-    pub fn saved() -> bool {
-        Self::storage_path().exists()
-    }
-
-    // Get the credentials storage path
-    pub fn storage_path() -> PathBuf {
-        // Either store in conventional place or next to binary
-        let mut data_dir = dirs::data_dir().unwrap_or(PathBuf::from("./"));
-
-        data_dir.push("spotic");
-        data_dir.push("credentials.json");
-
-        data_dir
-    }
-}
-
-// Provides auth tokens, refreshing if necessary
-pub struct TokenProvider {}
-
-impl TokenProvider {
-    // Get a new token provider
-    pub fn new(credentials: Tokens) -> Self {
-        Self {}
-    }
-
-    // Get a token, refresh if necessary
-    pub fn token() -> String {
-        "".to_string()
-    }
-}
-
+const CALLBACK_URI: &'static str = "http://localhost/callback";
 pub struct AuthFlow {}
 
 impl AuthFlow {
-    pub fn new() -> Self {
-        Self {}
-    }
-
     pub fn scopes() -> HashSet<String> {
         scopes!("user-read-currently-playing")
     }
 
-    pub fn run(&self) -> Result<()> {
-        let creds = self.collect_creds()?;
+    pub async fn run() -> Result<()> {
+        let creds = Self::collect_creds()?;
+
+        let oauth = OAuth {
+            redirect_uri: CALLBACK_URI.to_string(),
+            scopes: Self::scopes(),
+            ..Default::default()
+        };
+
+        Self::authorize_spotify(creds, oauth).await?;
 
         Ok(())
     }
 
-    pub fn collect_creds(&self) -> Result<rspotify::Credentials> {
+    async fn authorize_spotify(creds: Credentials, oauth: OAuth) -> Result<SpotifyPlayer> {
+        let config = Config {
+            token_cached: true,
+            token_refreshing: true,
+            ..Default::default()
+        };
+
+        let mut spotify = AuthCodePkceSpotify::with_config(creds, oauth, config);
+
+        let url = spotify
+            .get_authorize_url(None)
+            .context("Failed getting auth URL")?;
+
+        spotify
+            .prompt_for_token(&url)
+            .await
+            .context("Failed getting auth tokens")?;
+
+        Ok(SpotifyPlayer::new(spotify))
+    }
+
+    fn collect_creds() -> Result<rspotify::Credentials> {
         println!(
 "To authorize this tool you need to provide client credentials.
 
