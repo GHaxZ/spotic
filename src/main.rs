@@ -1,5 +1,5 @@
 use anyhow::Result;
-use auth::AuthFlow;
+use auth::Auth;
 
 mod auth;
 mod client;
@@ -9,10 +9,18 @@ mod model;
 //  Check if auth tokens are cached, don't run auth flow
 //  Make the code gathering easier
 //      - Run a small web server which reads the code from the callback and displays a success
-//      messagee
+//      message
 //      - Or simply make the url input prettier
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    AuthFlow::run().await
+    if let Some(s) = Auth::load_cached().await? {
+        println!("Loaded cached");
+        return Ok(());
+    }
+
+    Auth::run_flow().await?;
+    println!("Finished flow");
+
+    Ok(())
 }
