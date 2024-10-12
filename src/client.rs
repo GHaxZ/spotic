@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use rspotify::{
-    model::{AdditionalType, PlayableItem},
+    model::{
+        AdditionalType, CurrentPlaybackContext, PlayableItem, RepeatState, SearchResult, SearchType,
+    },
     prelude::OAuthClient,
     AuthCodePkceSpotify,
 };
@@ -17,42 +19,192 @@ impl SpotifyPlayer {
         Self { client }
     }
 
-    pub async fn current_track(&mut self) -> Result<Option<Track>> {
+    pub async fn current_track(&self) -> Result<Option<Track>> {
         let currently_playing = self
             .client
             .current_playing(None, None::<Option<&AdditionalType>>)
             .await
-            .context("Failed getting the current track")?;
+            .context("Failed getting the current track")?
+            .context("Current track is unknown")?;
 
-        if let Some(cp) = currently_playing {
-            if !cp.is_playing {
-                return Ok(None);
-            }
-
-            return match cp.item {
-                Some(PlayableItem::Track(track)) => Ok(Some(Track {
-                    id: track.id.map(|i| i.to_string()),
-                    title: track.name,
-                    by: track.artists.iter().map(|a| a.name.clone()).collect(),
-                })),
-                Some(PlayableItem::Episode(episode)) => Ok(Some(Track {
-                    id: Some(episode.id.to_string()),
-                    title: episode.name,
-                    by: vec![episode.show.name],
-                })),
-                _ => Ok(None),
-            };
+        if !currently_playing.is_playing {
+            return Ok(None);
         }
 
-        // Return None if there is no currently playing item
-        Ok(None)
+        return match currently_playing.item {
+            Some(PlayableItem::Track(track)) => Ok(Some(Track {
+                id: track.id.map(|i| i.to_string()),
+                title: track.name,
+                by: track.artists.iter().map(|a| a.name.clone()).collect(),
+            })),
+            Some(PlayableItem::Episode(episode)) => Ok(Some(Track {
+                id: Some(episode.id.to_string()),
+                title: episode.name,
+                by: vec![episode.show.name],
+            })),
+            _ => Ok(None),
+        };
     }
 
-    pub fn play_track(&self, track: Track) {}
+    pub async fn playback_pause(&self) -> Result<()> {
+        self.client
+            .pause_playback(None)
+            .await
+            .context("Failed pausing playback")?;
 
-    pub fn set_volume(&self, volume: u8) {}
+        Ok(())
+    }
 
-    pub fn volume_up(&self, up: u8) {}
+    pub async fn playback_resume(&self) -> Result<()> {
+        self.client
+            .resume_playback(None, None)
+            .await
+            .context("Failed pausing playback")?;
 
-    pub fn volume_down(&self, down: u8) {}
+        Ok(())
+    }
+
+    pub async fn playback_toggle(&self) -> Result<()> {
+        let current_playback = self.playback_state().await?;
+
+        if current_playback.is_playing {
+            self.playback_pause().await?;
+        } else {
+            self.playback_resume().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn volume_get(&self) -> Result<u8> {
+        let current_playback = self.playback_state().await?;
+
+        Ok(current_playback
+            .device
+            .volume_percent
+            .context("No current volume")? as u8)
+    }
+
+    pub async fn volume_set(&self, volume: u8) -> Result<()> {
+        self.client
+            .volume(volume.clamp(0, 100), None)
+            .await
+            .context("Failed setting volume")?;
+
+        Ok(())
+    }
+
+    pub async fn volume_up(&self, up: u8) -> Result<()> {
+        let volume = self.volume_get().await?;
+
+        self.volume_set(volume + up).await?;
+
+        Ok(())
+    }
+
+    pub async fn volume_down(&self, down: u8) -> Result<()> {
+        let volume = self.volume_get().await?;
+
+        self.volume_set(volume - down).await?;
+
+        Ok(())
+    }
+
+    pub async fn song_next(&self) -> Result<()> {
+        self.client
+            .next_track(None)
+            .await
+            .context("Failed skipping track")?;
+
+        Ok(())
+    }
+
+    pub async fn song_prev(&self) -> Result<()> {
+        self.client
+            .previous_track(None)
+            .await
+            .context("Failed skipping track")?;
+
+        Ok(())
+    }
+
+    pub async fn shuffle_on(&self) -> Result<()> {
+        self.client
+            .shuffle(true, None)
+            .await
+            .context("Failed turning shuffle on")?;
+
+        Ok(())
+    }
+
+    pub async fn shuffle_off(&self) -> Result<()> {
+        self.client
+            .shuffle(false, None)
+            .await
+            .context("Failed turning shuffle off")?;
+
+        Ok(())
+    }
+
+    pub async fn shuffle_toggle(&self) -> Result<()> {
+        let current_playback = self.playback_state().await?;
+
+        if current_playback.shuffle_state {
+            self.shuffle_off().await?;
+        } else {
+            self.shuffle_on().await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn repeat_on(&self) -> Result<()> {
+        self.client
+            .repeat(RepeatState::Context, None)
+            .await
+            .context("Failed turning shuffle on")?;
+
+        Ok(())
+    }
+
+    pub async fn repeat_off(&self) -> Result<()> {
+        self.client
+            .repeat(RepeatState::Off, None)
+            .await
+            .context("Failed turning shuffle off")?;
+
+        Ok(())
+    }
+
+    pub async fn repeat_track(&self) -> Result<()> {
+        self.client
+            .repeat(RepeatState::Track, None)
+            .await
+            .context("Failed turning shuffle off")?;
+
+        Ok(())
+    }
+
+    pub async fn repeat_toggle(&self) -> Result<()> {
+        let current_playback = self.playback_state().await?;
+
+        match current_playback.repeat_state {
+            RepeatState::Off => self.repeat_on().await?,
+            RepeatState::Track => self.shuffle_off().await?,
+            RepeatState::Context => self.repeat_off().await?,
+        }
+
+        Ok(())
+    }
+
+    async fn playback_state(&self) -> Result<CurrentPlaybackContext> {
+        let current_playback = self
+            .client
+            .current_playback(None, None::<Option<&AdditionalType>>)
+            .await
+            .context("Failed getting current playback state")?
+            .context("No current playback")?;
+
+        Ok(current_playback)
+    }
 }

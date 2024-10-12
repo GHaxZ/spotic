@@ -5,7 +5,7 @@ use rspotify::{
     scopes, AuthCodePkceSpotify, Config, Credentials, OAuth,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, env, fs, path::PathBuf};
+use std::{collections::HashSet, fs, path::PathBuf};
 
 use crate::client::SpotifyPlayer;
 
@@ -56,7 +56,11 @@ impl Auth {
     /// In case these get updated and are not granted by the current authorization, the user will
     /// be asked to re-authorize
     fn scopes() -> HashSet<String> {
-        scopes!("user-read-currently-playing")
+        scopes!(
+            "user-read-currently-playing",
+            "user-modify-playback-state",
+            "user-read-playback-state"
+        )
     }
 
     /// Get the oauth settings used across the authorization code

@@ -13,14 +13,9 @@ mod model;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut player = match Auth::load_cached().await? {
+    let player = match Auth::load_cached().await? {
         Some(player) => player,
         None => Auth::run_flow().await?,
-    };
-
-    match player.current_track().await? {
-        Some(t) => println!("\"{}\" by {}", t.title, t.by.join(", ")),
-        None => println!("Nothing playing"),
     };
 
     Ok(())
