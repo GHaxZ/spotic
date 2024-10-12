@@ -18,9 +18,10 @@ async fn main() -> Result<()> {
         None => Auth::run_flow().await?,
     };
 
-    let current = player.current_track().await?;
-
-    println!("{:?}", current);
+    match player.current_track().await? {
+        Some(t) => println!("\"{}\" by {}", t.title, t.by.join(", ")),
+        None => println!("Nothing playing"),
+    };
 
     Ok(())
 }

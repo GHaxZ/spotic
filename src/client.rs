@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rspotify::{
     model::{AdditionalType, PlayableItem},
-    prelude::{BaseClient, OAuthClient},
+    prelude::OAuthClient,
     AuthCodePkceSpotify,
 };
 
@@ -24,19 +24,28 @@ impl SpotifyPlayer {
             .await
             .context("Failed getting the current track")?;
 
-        match currently_playing.and_then(|cp| cp.item) {
-            Some(PlayableItem::Track(track)) => Ok(Some(Track {
-                id: track.id.map(|i| i.to_string()),
-                title: track.name,
-                by: track.artists.iter().map(|a| a.name.clone()).collect(),
-            })),
-            Some(PlayableItem::Episode(episode)) => Ok(Some(Track {
-                id: Some(episode.id.to_string()),
-                title: episode.name,
-                by: vec![episode.show.name],
-            })),
-            _ => Ok(None),
+        if let Some(cp) = currently_playing {
+            if !cp.is_playing {
+                return Ok(None);
+            }
+
+            return match cp.item {
+                Some(PlayableItem::Track(track)) => Ok(Some(Track {
+                    id: track.id.map(|i| i.to_string()),
+                    title: track.name,
+                    by: track.artists.iter().map(|a| a.name.clone()).collect(),
+                })),
+                Some(PlayableItem::Episode(episode)) => Ok(Some(Track {
+                    id: Some(episode.id.to_string()),
+                    title: episode.name,
+                    by: vec![episode.show.name],
+                })),
+                _ => Ok(None),
+            };
         }
+
+        // Return None if there is no currently playing item
+        Ok(None)
     }
 
     pub fn play_track(&self, track: Track) {}

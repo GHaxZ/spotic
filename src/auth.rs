@@ -4,11 +4,17 @@ use rspotify::{
     prelude::{BaseClient, OAuthClient},
     scopes, AuthCodePkceSpotify, Config, Credentials, OAuth,
 };
+use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, env, fs, path::PathBuf};
 
 use crate::client::SpotifyPlayer;
 
 const CALLBACK_URI: &'static str = "http://localhost/callback";
+
+#[derive(Serialize, Deserialize)]
+pub struct ClientCredentials {
+    client_id: String,
+}
 
 pub struct Auth {}
 
@@ -21,11 +27,18 @@ impl Auth {
         data_dir
     }
 
-    /// Get the credentials storage path
-    pub fn credentials_path() -> PathBuf {
+    /// Get the tokens storage path
+    pub fn tokens_path() -> PathBuf {
         let mut credentials_path = Self::data_dir();
-        credentials_path.push("credentials.json");
+        credentials_path.push("tokens.json");
         credentials_path
+    }
+
+    /// Get the client credentials storage path
+    pub fn credentials_path() -> PathBuf {
+        let mut client_path = Self::data_dir();
+        client_path.push("credentials.json");
+        client_path
     }
 
     /// Ensure the data directory is created
@@ -33,9 +46,9 @@ impl Auth {
         fs::create_dir_all(Self::data_dir()).context("Failed creating data directory")
     }
 
-    /// Do saved credentials exist
+    /// Do saved tokens and credentials exist
     pub fn saved() -> bool {
-        Self::credentials_path().exists()
+        Self::tokens_path().exists() && Self::credentials_path().exists()
     }
 
     /// Get the scopes required for all functionality
@@ -60,7 +73,7 @@ impl Auth {
         Config {
             token_cached: true,
             token_refreshing: true,
-            cache_path: Self::credentials_path(),
+            cache_path: Self::tokens_path(),
             ..Default::default()
         }
     }
@@ -79,11 +92,22 @@ impl Auth {
             return Ok(None);
         }
 
-        let spotify =
-            AuthCodePkceSpotify::with_config(Credentials::default(), Self::oauth(), Self::config());
+        let creds_str = fs::read_to_string(Self::credentials_path())
+            .context("Failed reading stored client credentials, try re-authorizing")?;
+
+        let creds = serde_json::from_str::<ClientCredentials>(&creds_str)
+            .context("Failed deserializing stored client credentials, try re-authorizing")?;
+
+        let spotify = AuthCodePkceSpotify::with_config(
+            Credentials::new_pkce(&creds.client_id),
+            Self::oauth(),
+            Self::config(),
+        );
 
         match spotify.read_token_cache(true).await {
             Ok(Some(token)) => {
+                *spotify.token.lock().await.unwrap() = Some(token.clone());
+
                 if token.is_expired() {
                     spotify
                         .refresh_token()
@@ -91,7 +115,6 @@ impl Auth {
                         .context("Failed to refresh token")?;
                 }
 
-                *spotify.token.lock().await.unwrap() = Some(token.clone());
                 Ok(Some(SpotifyPlayer::new(spotify)))
             }
             Ok(None) => Ok(None),
@@ -121,7 +144,17 @@ impl Auth {
     async fn authorize_spotify(creds: Credentials, oauth: OAuth) -> Result<SpotifyPlayer> {
         Self::ensure_dir()?;
 
-        let mut spotify = AuthCodePkceSpotify::with_config(creds, oauth, Self::config());
+        let mut spotify = AuthCodePkceSpotify::with_config(creds.clone(), oauth, Self::config());
+
+        // Serialize the client credentials
+        let creds_str = serde_json::to_string(&ClientCredentials {
+            client_id: creds.id,
+        })
+        .context("Failed serializing client credentials")?;
+
+        // Save the client credentials
+        fs::write(Self::credentials_path(), creds_str)
+            .context("Failed saving client credentials")?;
 
         let url = spotify
             .get_authorize_url(None)
