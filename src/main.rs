@@ -6,7 +6,6 @@ mod client;
 mod model;
 
 //  TODO:
-//  Check if auth tokens are cached, don't run auth flow
 //  Make the code gathering easier
 //      - Run a small web server which reads the code from the callback and displays a success
 //      message
@@ -14,13 +13,14 @@ mod model;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if let Some(s) = Auth::load_cached().await? {
-        println!("Loaded cached");
-        return Ok(());
-    }
+    let mut player = match Auth::load_cached().await? {
+        Some(player) => player,
+        None => Auth::run_flow().await?,
+    };
 
-    Auth::run_flow().await?;
-    println!("Finished flow");
+    let current = player.current_track().await?;
+
+    println!("{:?}", current);
 
     Ok(())
 }

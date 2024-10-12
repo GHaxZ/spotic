@@ -1,5 +1,6 @@
+#[derive(Debug)]
 pub struct Track {
-    pub id: u32,
+    pub id: Option<String>,
     pub title: String,
-    pub artists: Vec<String>,
+    pub by: Vec<String>,
 }

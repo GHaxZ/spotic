@@ -1,4 +1,9 @@
-use rspotify::AuthCodePkceSpotify;
+use anyhow::{Context, Result};
+use rspotify::{
+    model::{AdditionalType, PlayableItem},
+    prelude::{BaseClient, OAuthClient},
+    AuthCodePkceSpotify,
+};
 
 use crate::model::Track;
 
@@ -12,15 +17,33 @@ impl SpotifyPlayer {
         Self { client }
     }
 
-    pub fn current_track() -> Option<Track> {
-        None
+    pub async fn current_track(&mut self) -> Result<Option<Track>> {
+        let currently_playing = self
+            .client
+            .current_playing(None, None::<Option<&AdditionalType>>)
+            .await
+            .context("Failed getting the current track")?;
+
+        match currently_playing.and_then(|cp| cp.item) {
+            Some(PlayableItem::Track(track)) => Ok(Some(Track {
+                id: track.id.map(|i| i.to_string()),
+                title: track.name,
+                by: track.artists.iter().map(|a| a.name.clone()).collect(),
+            })),
+            Some(PlayableItem::Episode(episode)) => Ok(Some(Track {
+                id: Some(episode.id.to_string()),
+                title: episode.name,
+                by: vec![episode.show.name],
+            })),
+            _ => Ok(None),
+        }
     }
 
-    pub fn play_track(track: Track) {}
+    pub fn play_track(&self, track: Track) {}
 
-    pub fn set_volume(volume: u8) {}
+    pub fn set_volume(&self, volume: u8) {}
 
-    pub fn volume_up(up: u8) {}
+    pub fn volume_up(&self, up: u8) {}
 
-    pub fn volume_down(down: u8) {}
+    pub fn volume_down(&self, down: u8) {}
 }

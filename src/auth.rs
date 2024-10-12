@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use inquire::{Password, PasswordDisplayMode, Text};
-use rspotify::{prelude::OAuthClient, scopes, AuthCodePkceSpotify, Config, Credentials, OAuth};
-use std::{collections::HashSet, fs, path::PathBuf};
+use rspotify::{
+    prelude::{BaseClient, OAuthClient},
+    scopes, AuthCodePkceSpotify, Config, Credentials, OAuth,
+};
+use std::{collections::HashSet, env, fs, path::PathBuf};
 
 use crate::client::SpotifyPlayer;
 
@@ -80,7 +83,17 @@ impl Auth {
             AuthCodePkceSpotify::with_config(Credentials::default(), Self::oauth(), Self::config());
 
         match spotify.read_token_cache(true).await {
-            Ok(Some(_)) => Ok(Some(SpotifyPlayer::new(spotify))),
+            Ok(Some(token)) => {
+                if token.is_expired() {
+                    spotify
+                        .refresh_token()
+                        .await
+                        .context("Failed to refresh token")?;
+                }
+
+                *spotify.token.lock().await.unwrap() = Some(token.clone());
+                Ok(Some(SpotifyPlayer::new(spotify)))
+            }
             Ok(None) => Ok(None),
             Err(e) => Err(e).context("Failed reading cached tokens, try re-authorizing"),
         }
@@ -94,12 +107,10 @@ impl Auth {
     ///
     ///  TODO: Don't load tokens from cache, because this will only be run when either no cached tokens
     ///  are usable or the user specifically requests it
-    pub async fn run_flow() -> Result<()> {
+    pub async fn run_flow() -> Result<SpotifyPlayer> {
         let creds = Self::collect_creds()?;
 
-        Self::authorize_spotify(creds, Self::oauth()).await?;
-
-        Ok(())
+        Self::authorize_spotify(creds, Self::oauth()).await
     }
 
     /// Run the authorization process for spotify
