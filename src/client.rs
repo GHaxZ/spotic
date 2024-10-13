@@ -3,15 +3,15 @@ use rspotify::{
     model::{
         AdditionalType, CurrentPlaybackContext, PlayableItem, RepeatState, SearchResult, SearchType,
     },
-    prelude::OAuthClient,
+    prelude::{BaseClient, OAuthClient},
     AuthCodePkceSpotify,
 };
 
-use crate::model::Track;
+use crate::model::{Playable, Track};
 
 // Used to control the spotify player
 pub struct SpotifyPlayer {
-    client: AuthCodePkceSpotify,
+    pub client: AuthCodePkceSpotify,
 }
 
 impl SpotifyPlayer {
@@ -108,6 +108,39 @@ impl SpotifyPlayer {
         self.volume_set(volume - down).await?;
 
         Ok(())
+    }
+
+    pub async fn search(
+        &self,
+        query: String,
+        search_type: SearchType,
+        limit: Option<u32>,
+    ) -> Result<Vec<Box<dyn Playable + 'static>>> {
+        let search = self
+            .client
+            .search(&query, search_type, None, None, limit, None)
+            .await
+            .context("Failed searching content")?;
+
+        let mut results: Vec<Box<dyn Playable>> = Vec::new();
+
+        fn map_playable<T: Playable + 'static>(items: Vec<T>) -> Vec<Box<dyn Playable>> {
+            items
+                .into_iter()
+                .map(|item| Box::new(item) as Box<dyn Playable>)
+                .collect()
+        }
+
+        match search {
+            SearchResult::Playlists(playlists) => results.extend(map_playable(playlists.items)),
+            SearchResult::Albums(albums) => results.extend(map_playable(albums.items)),
+            SearchResult::Artists(artists) => results.extend(map_playable(artists.items)),
+            SearchResult::Tracks(tracks) => results.extend(map_playable(tracks.items)),
+            SearchResult::Shows(shows) => results.extend(map_playable(shows.items)),
+            SearchResult::Episodes(episodes) => results.extend(map_playable(episodes.items)),
+        }
+
+        Ok(results)
     }
 
     pub async fn song_next(&self) -> Result<()> {

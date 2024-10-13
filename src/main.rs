@@ -1,5 +1,6 @@
 use anyhow::Result;
 use auth::Auth;
+use rspotify::model::SearchType;
 
 mod auth;
 mod client;
@@ -17,6 +18,24 @@ async fn main() -> Result<()> {
         Some(player) => player,
         None => Auth::run_flow().await?,
     };
+
+    let res = player
+        .search(format!("Never gonna give you up"), SearchType::Track, None)
+        .await?;
+
+    println!(
+        "{}",
+        res.iter()
+            .map(|p| p.to_display())
+            .collect::<Vec<String>>()
+            .join("\n")
+    );
+
+    let first = res.get(0).unwrap();
+
+    println!("Playing: {} [{}]", first.to_display(), first.type_string());
+
+    first.play(&player.client).await?;
 
     Ok(())
 }
