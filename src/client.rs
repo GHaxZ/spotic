@@ -11,7 +11,7 @@ use crate::model::{Playable, Track};
 
 // Used to control the spotify player
 pub struct SpotifyPlayer {
-    pub client: AuthCodePkceSpotify,
+    client: AuthCodePkceSpotify,
 }
 
 impl SpotifyPlayer {
@@ -141,6 +141,14 @@ impl SpotifyPlayer {
         }
 
         Ok(results)
+    }
+
+    pub async fn play(&self, item: &Box<dyn Playable>) -> Result<()> {
+        item.play(&self.client)
+            .await
+            .context("Failed playing item")?;
+
+        Ok(())
     }
 
     pub async fn song_next(&self) -> Result<()> {

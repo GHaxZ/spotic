@@ -35,7 +35,14 @@ async fn main() -> Result<()> {
 
     println!("Playing: {} [{}]", first.to_display(), first.type_string());
 
-    first.play(&player.client).await?;
+    player.play(first).await?;
+
+    let cur = player.current_track().await?;
+
+    match cur {
+        Some(t) => println!("\"{}\" by {}", t.title, t.by.join(", ")),
+        None => println!("Nothing playing"),
+    }
 
     Ok(())
 }
