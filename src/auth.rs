@@ -182,12 +182,12 @@ Don't worry, this is easy to do and only has to be done once.
 To get these credentials go to the Spotify Developer Dashboard: https://developer.spotify.com/dashboard
 
 1. Create a new app and give it any name and description.
-2. Make sure to add the \"http://localhost/callback\" Redirect URI.
+2. Make sure to add the \"{}\" Redirect URI.
 3. Then select the \"Web API\" option.
 4. Accept the Terms of Service and finally click \"Save\".
 5. Now click on the newly created app and go to the settings.
 6. Here you will find the client id and the client secret.
-"
+", CALLBACK_URI
         );
 
         let client_id = Text::new("Enter the client id")
