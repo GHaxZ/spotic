@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use inquire::{Password, PasswordDisplayMode, Text};
 use rspotify::{
     prelude::{BaseClient, OAuthClient},
     scopes, AuthCodePkceSpotify, Config, Credentials, OAuth,
@@ -7,7 +6,7 @@ use rspotify::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::PathBuf};
 
-use crate::client::SpotifyPlayer;
+use crate::{client::SpotifyPlayer, ui};
 
 const CALLBACK_URI: &'static str = "http://localhost/callback";
 
@@ -135,7 +134,7 @@ impl Auth {
     ///  TODO: Don't load tokens from cache, because this will only be run when either no cached tokens
     ///  are usable or the user specifically requests it
     pub async fn run_flow() -> Result<SpotifyPlayer> {
-        let creds = Self::collect_creds()?;
+        let creds = ui::collect_creds(CALLBACK_URI)?;
 
         Self::authorize_spotify(creds, Self::oauth()).await
     }
@@ -170,36 +169,5 @@ impl Auth {
             .context("Failed getting auth tokens")?;
 
         Ok(SpotifyPlayer::new(spotify))
-    }
-
-    /// Collect client id and client secrets
-    fn collect_creds() -> Result<rspotify::Credentials> {
-        println!(
-"To authorize this tool you need to provide client credentials.
-
-Don't worry, this is easy to do and only has to be done once.
-
-To get these credentials go to the Spotify Developer Dashboard: https://developer.spotify.com/dashboard
-
-1. Create a new app and give it any name and description.
-2. Make sure to add the \"{}\" Redirect URI.
-3. Then select the \"Web API\" option.
-4. Accept the Terms of Service and finally click \"Save\".
-5. Now click on the newly created app and go to the settings.
-6. Here you will find the client id and the client secret.
-", CALLBACK_URI
-        );
-
-        let client_id = Text::new("Enter the client id")
-            .prompt()
-            .context("Failed reading client id input")?;
-        let client_secret = Password::new("Enter the client secret")
-            .with_display_toggle_enabled()
-            .without_confirmation()
-            .with_display_mode(PasswordDisplayMode::Masked)
-            .prompt()
-            .context("Failed reading client secret input")?;
-
-        Ok(Credentials::new(&client_id, &client_secret))
     }
 }
