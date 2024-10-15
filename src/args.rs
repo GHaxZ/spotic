@@ -230,7 +230,7 @@ fn shuffle_parser(arg: &str) -> Result<ShuffleOperation, String> {
     match arg.to_lowercase().as_str() {
         "on" => Ok(ShuffleOperation::On),
         "off" => Ok(ShuffleOperation::Off),
-        _ => Err(format!("Not a valid shuffle mode", arg)),
+        _ => Err(format!("Not a valid shuffle mode")),
     }
 }
 
@@ -239,6 +239,6 @@ fn repeat_parser(arg: &str) -> Result<RepeatOperation, String> {
         "on" => Ok(RepeatOperation::On),
         "off" => Ok(RepeatOperation::Off),
         "track" => Ok(RepeatOperation::Track),
-        _ => Err(format!("Not a valid repeat mode", arg)),
+        _ => Err(format!("Not a valid repeat mode")),
     }
 }
