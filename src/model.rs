@@ -1,4 +1,8 @@
-use std::{future::Future, pin::Pin};
+use std::{
+    fmt::{Display, Formatter},
+    future::Future,
+    pin::Pin,
+};
 
 use anyhow::{Context, Result};
 use rspotify::{
@@ -25,6 +29,12 @@ pub trait Playable {
         &'a self,
         client: &'a AuthCodePkceSpotify,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+}
+
+impl Display for dyn Playable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} [{}]", self.to_display(), self.type_string())
+    }
 }
 
 impl Playable for FullTrack {

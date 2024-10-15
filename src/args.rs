@@ -1,8 +1,8 @@
 use anyhow::Result;
-use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
+use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use rspotify::model::SearchType;
 
-use crate::auth::Auth;
+use crate::{auth::Auth, ui};
 
 #[derive(Clone)]
 enum VolumeOperation {
@@ -92,10 +92,15 @@ pub async fn parse() -> Result<()> {
     if let Some(search) = matches.subcommand_matches("search") {
         if let Some(search_type) = type_matches(search) {
             if let Some(query) = search.get_one::<String>("content") {
-                let res = player.search(query.clone(), search_type, Some(1)).await?;
+                let count = search.get_one::<u32>("count").unwrap_or_else(|| &10);
 
-                // Let user select from list here
-                todo!();
+                let res = player
+                    .search(query.clone(), search_type, Some(*count))
+                    .await?;
+
+                let selected = ui::select_playable(res)?;
+
+                return player.play(&selected).await;
             }
         }
     }
@@ -217,6 +222,12 @@ fn command() -> Command {
                 .alias("se")
                 .group(ArgGroup::new("type").required(true).multiple(false))
                 .args([
+                    Arg::new("count")
+                        .help("The amount of items to search")
+                        .long("count")
+                        .short('c')
+                        .action(ArgAction::Set)
+                        .value_parser(value_parser!(u32)),
                     Arg::new("track")
                         .help("Search for tracks")
                         .group("type")
