@@ -33,12 +33,10 @@ impl SpotifyPlayer {
 
         return match currently_playing.item {
             Some(PlayableItem::Track(track)) => Ok(Some(Track {
-                id: track.id.map(|i| i.to_string()),
                 title: track.name,
                 by: track.artists.iter().map(|a| a.name.clone()).collect(),
             })),
             Some(PlayableItem::Episode(episode)) => Ok(Some(Track {
-                id: Some(episode.id.to_string()),
                 title: episode.name,
                 by: vec![episode.show.name],
             })),
@@ -47,19 +45,27 @@ impl SpotifyPlayer {
     }
 
     pub async fn playback_pause(&self) -> Result<()> {
-        self.client
-            .pause_playback(None)
-            .await
-            .context("Failed pausing playback")?;
+        let current_playback = self.playback_state().await?;
+
+        if current_playback.is_playing {
+            self.client
+                .pause_playback(None)
+                .await
+                .context("Failed pausing playback")?;
+        }
 
         Ok(())
     }
 
     pub async fn playback_resume(&self) -> Result<()> {
-        self.client
-            .resume_playback(None, None)
-            .await
-            .context("Failed pausing playback")?;
+        let current_playback = self.playback_state().await?;
+
+        if !current_playback.is_playing {
+            self.client
+                .resume_playback(None, None)
+                .await
+                .context("Failed resuming playback")?;
+        }
 
         Ok(())
     }

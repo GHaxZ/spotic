@@ -1,5 +1,8 @@
 use anyhow::Result;
-use clap::{Arg, ArgAction, ArgGroup, Command};
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
+use rspotify::model::SearchType;
+
+use crate::auth::Auth;
 
 #[derive(Clone)]
 enum VolumeOperation {
@@ -23,6 +26,108 @@ enum RepeatOperation {
 
 pub async fn parse() -> Result<()> {
     let matches = command().get_matches();
+
+    if matches.get_flag("authorize") {
+        Auth::run_flow().await?;
+        return Ok(());
+    }
+
+    // Get a SpotifyPlayer instance for controlling, run auth flow in case user is not authorized
+    // yet
+
+    let player = match Auth::load_cached().await? {
+        Some(player) => player,
+        None => Auth::run_flow().await?,
+    };
+
+    if let Some(_) = matches.subcommand_matches("current") {
+        let track = player.current_track().await?;
+
+        match track {
+            Some(t) => println!("\"{}\" by {}", t.title, t.by.join(", ")),
+            None => println!("Nothing playing"),
+        }
+
+        return Ok(());
+    }
+
+    if let Some(_) = matches.subcommand_matches("pause") {
+        return player.playback_pause().await;
+    }
+
+    if let Some(_) = matches.subcommand_matches("resume") {
+        return player.playback_resume().await;
+    }
+
+    if let Some(_) = matches.subcommand_matches("toggle") {
+        return player.playback_toggle().await;
+    }
+
+    if let Some(vol) = matches.subcommand_matches("volume") {
+        if let Some(op) = vol.get_one::<VolumeOperation>("amount") {
+            return match op.clone() {
+                VolumeOperation::Increase(i) => player.volume_up(i).await,
+                VolumeOperation::Decrease(d) => player.volume_down(d).await,
+                VolumeOperation::Set(s) => player.volume_set(s).await,
+            };
+        }
+    }
+
+    if let Some(play) = matches.subcommand_matches("play") {
+        if let Some(play_type) = type_matches(play) {
+            if let Some(query) = play.get_one::<String>("content") {
+                let res = player.search(query.clone(), play_type, Some(1)).await?;
+
+                if let Some(first) = res.get(0) {
+                    player.play(first).await?;
+                } else {
+                    println!("No matches found")
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
+    if let Some(search) = matches.subcommand_matches("search") {
+        if let Some(search_type) = type_matches(search) {
+            if let Some(query) = search.get_one::<String>("content") {
+                let res = player.search(query.clone(), search_type, Some(1)).await?;
+
+                // Let user select from list here
+                todo!();
+            }
+        }
+    }
+
+    if let Some(_) = matches.subcommand_matches("next") {
+        return player.song_next().await;
+    }
+
+    if let Some(_) = matches.subcommand_matches("prev") {
+        return player.song_prev().await;
+    }
+
+    if let Some(shuffle) = matches.subcommand_matches("shuffle") {
+        return match shuffle.get_one::<ShuffleOperation>("mode") {
+            Some(mode) => match mode {
+                ShuffleOperation::On => player.shuffle_on().await,
+                ShuffleOperation::Off => player.shuffle_off().await,
+            },
+            None => player.shuffle_toggle().await,
+        };
+    }
+
+    if let Some(repeat) = matches.subcommand_matches("repeat") {
+        return match repeat.get_one::<RepeatOperation>("mode") {
+            Some(mode) => match mode {
+                RepeatOperation::On => player.repeat_on().await,
+                RepeatOperation::Off => player.repeat_off().await,
+                RepeatOperation::Track => player.repeat_track().await,
+            },
+            None => player.repeat_toggle().await,
+        };
+    }
 
     Ok(())
 }
@@ -240,5 +345,23 @@ fn repeat_parser(arg: &str) -> Result<RepeatOperation, String> {
         "off" => Ok(RepeatOperation::Off),
         "track" => Ok(RepeatOperation::Track),
         _ => Err(format!("Not a valid repeat mode")),
+    }
+}
+
+fn type_matches(matches: &ArgMatches) -> Option<SearchType> {
+    if matches.get_flag("track") {
+        Some(SearchType::Track)
+    } else if matches.get_flag("playlist") {
+        Some(SearchType::Playlist)
+    } else if matches.get_flag("album") {
+        Some(SearchType::Album)
+    } else if matches.get_flag("artist") {
+        Some(SearchType::Artist)
+    } else if matches.get_flag("show") {
+        Some(SearchType::Show)
+    } else if matches.get_flag("episode") {
+        Some(SearchType::Episode)
+    } else {
+        None
     }
 }
