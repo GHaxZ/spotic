@@ -42,14 +42,8 @@ To get these credentials go to the Spotify Developer Dashboard: https://develope
     Ok(Credentials::new(&client_id, &client_secret))
 }
 
-/// Collect the redirect url
-pub fn collect_redirect_url(url: &String) -> Result<String> {
-    println!("\nAuthorization link: {}\n", url);
-
-    if open::that(url).is_err() {
-        println!("Failed opening the link in a browser, please open it manually.\n");
-    }
-
+/// Collect the callback URL manually
+pub fn collect_callback_url() -> Result<String> {
     // Get the code from the link
     let url_input = Text::new("Please paste the url that was opened in your browser")
         .prompt()

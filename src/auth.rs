@@ -1,14 +1,22 @@
 use anyhow::{Context, Result};
+use const_format::concatcp;
+use core::str;
 use rspotify::{
     prelude::{BaseClient, OAuthClient},
     scopes, AuthCodePkceSpotify, Config, Credentials, OAuth,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::PathBuf};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+};
 
 use crate::{client::SpotifyPlayer, ui};
 
-const CALLBACK_URI: &'static str = "http://localhost/callback";
+const CALLBACK_SERVER_PORT: u32 = 8080;
+const CALLBACK_URI: &'static str =
+    concatcp!("http://localhost:", CALLBACK_SERVER_PORT, "/callback");
 
 #[derive(Serialize, Deserialize)]
 pub struct ClientCredentials {
@@ -126,7 +134,7 @@ pub async fn load_cached() -> Result<Option<SpotifyPlayer>> {
 ///
 /// - Ask the user for credentials
 /// - Generate the authorization url and open it
-/// - Ask the user for the redirect url, get the code from it
+/// - Collect the redirect url, get the code from it
 /// - Write the tokens to the cache file
 pub async fn run_flow() -> Result<SpotifyPlayer> {
     let creds = ui::collect_creds(CALLBACK_URI).context("Failed collecting credentials")?;
@@ -136,8 +144,12 @@ pub async fn run_flow() -> Result<SpotifyPlayer> {
 
 /// Run the authorization process for spotify
 ///
+/// - Write the credentials to file
 /// - Get the authorization URL
-/// - If tokens can't be used, prompt the user
+/// - Collect the code from the callback URL
+/// using either small web server or manual user input
+/// - Use the code to request authorization tokens
+/// - Write the tokens to file
 /// - Return a usable SpotifyPlayer if everything went well
 async fn authorize_spotify(creds: Credentials, oauth: OAuth) -> Result<SpotifyPlayer> {
     ensure_dir()?;
@@ -158,12 +170,24 @@ async fn authorize_spotify(creds: Credentials, oauth: OAuth) -> Result<SpotifyPl
         .get_authorize_url(None)
         .context("Failed getting auth URL")?;
 
-    let url_input = ui::collect_redirect_url(&url).context("Failed collecting the redirect url")?;
+    println!("\nAuthorization link: {}\n", url);
 
-    // Parse the code from the url input
+    // Try opening the URL using a browser
+    if open::that(url).is_err() {
+        println!("Failed opening the link in a browser, please open it manually.\n");
+    }
+
+    // Either get the callback URL using a locally running web server, or, in case of errors,
+    // let the user enter the URL manually
+    let url = match run_callback_server().await {
+        Ok(url) => url,
+        Err(_) => ui::collect_callback_url().context("Failed reading the callback URL")?,
+    };
+
+    // Parse the code from the callback URL
     let code = spotify
-        .parse_response_code(&url_input)
-        .context("Failed parsing response code from url")?;
+        .parse_response_code(&url)
+        .context("Failed reading authorization code from url")?;
 
     // Request the tokens using the code
     spotify
@@ -177,5 +201,63 @@ async fn authorize_spotify(creds: Credentials, oauth: OAuth) -> Result<SpotifyPl
         .await
         .context("Failed caching the token")?;
 
+    println!("Successfully authorized!");
+
     Ok(SpotifyPlayer::new(spotify))
+}
+
+/// Runs a local server which is used as the callback for the spotify API
+///
+/// This allows us to do two things:
+/// - Collect the response URL and thus the authorization code automatically
+/// - Show the user a neat "You can close this page now" message after authorizing
+/// the spotify app
+async fn run_callback_server() -> Result<String> {
+    // Listen on the callback port
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", CALLBACK_SERVER_PORT))
+        .await
+        .context("Failed running callback server")?;
+
+    // Accept connection
+    let (mut socket, _) = listener
+        .accept()
+        .await
+        .context("Failed accepting connection")?;
+
+    // Create buffer for reading from socket
+    let mut buffer = vec![0; 1024];
+
+    // Read from socket into buffer, store amount of read bytes
+    let n = socket
+        .read(&mut buffer)
+        .await
+        .context("Failed reading bytes from connection to callback server")?;
+
+    // Create string from byte array until the n (the read amount)
+    let request = str::from_utf8(&buffer[..n]).context("Callback URL is malformed")?;
+
+    // Get the first line from the buffer, that being the URL
+    let url = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .context("Failed to extract URL from the request")?;
+
+    // Create response
+    let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+        <body style='font-family: sans-serif; display: flex; align-items: center; height: 100vh;'>\
+        <h1 style='margin: auto;'>You can close this page now.</h1>\
+        </body>";
+
+    // Write the response
+    socket
+        .write_all(response)
+        .await
+        .context("Failed sending response from callback server")?;
+
+    // Reconstruct the full URL
+    let full_url = format!("http://localhost:{}{}", CALLBACK_SERVER_PORT, url);
+
+    // Finally return the URL
+    Ok(full_url)
 }

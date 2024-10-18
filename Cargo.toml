@@ -10,10 +10,11 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.89"
 clap = "4.5.20"
+const_format = "0.2.33"
 dirs = "5.0.1"
 inquire = "0.7.5"
 open = "5.3.0"
-rspotify = { version = "0.13.3", features = ["cli"] }
+rspotify = { version = "0.13.3" }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
 tokio = { version = "1.40.0", features = ["full"] }
