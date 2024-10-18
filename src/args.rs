@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use rspotify::model::SearchType;
 
-use crate::{auth::Auth, ui};
+use crate::{auth, ui};
 
 #[derive(Clone)]
 enum VolumeOperation {
@@ -28,16 +28,16 @@ pub async fn parse() -> Result<()> {
     let matches = command().get_matches();
 
     if matches.get_flag("authorize") {
-        Auth::run_flow().await?;
+        auth::run_flow().await?;
         return Ok(());
     }
 
     // Get a SpotifyPlayer instance for controlling, run auth flow in case user is not authorized
     // yet
 
-    let player = match Auth::load_cached().await? {
+    let player = match auth::load_cached().await? {
         Some(player) => player,
-        None => Auth::run_flow().await?,
+        None => auth::run_flow().await?,
     };
 
     if let Some(_) = matches.subcommand_matches("current") {

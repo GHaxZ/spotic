@@ -46,7 +46,7 @@ To get these credentials go to the Spotify Developer Dashboard: https://develope
 pub fn collect_redirect_url(url: &String) -> Result<String> {
     println!("\nAuthorization link: {}\n", url);
 
-    if open::that(url).is_ok() {
+    if open::that(url).is_err() {
         println!("Failed opening the link in a browser, please open it manually.\n");
     }
 
