@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use rspotify::model::SearchType;
 
@@ -98,7 +98,8 @@ pub async fn parse() -> Result<()> {
                     .search(query.clone(), search_type, Some(*count))
                     .await?;
 
-                let selected = ui::select_playable(res)?;
+                let selected =
+                    ui::select_playable(res).context("Failed selecting a playable item")?;
 
                 return player.play(&selected).await;
             }

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use inquire::Text;
 use rspotify::{
     prelude::{BaseClient, OAuthClient},
     scopes, AuthCodePkceSpotify, Config, Credentials, OAuth,
@@ -134,7 +135,7 @@ impl Auth {
     ///  TODO: Don't load tokens from cache, because this will only be run when either no cached tokens
     ///  are usable or the user specifically requests it
     pub async fn run_flow() -> Result<SpotifyPlayer> {
-        let creds = ui::collect_creds(CALLBACK_URI)?;
+        let creds = ui::collect_creds(CALLBACK_URI).context("Failed collecting credentials")?;
 
         Self::authorize_spotify(creds, Self::oauth()).await
     }
@@ -159,14 +160,30 @@ impl Auth {
         fs::write(Self::credentials_path(), creds_str)
             .context("Failed saving client credentials")?;
 
+        // Get the authorization url
         let url = spotify
             .get_authorize_url(None)
             .context("Failed getting auth URL")?;
 
+        let url_input =
+            ui::collect_redirect_url(&url).context("Failed collecting the redirect url")?;
+
+        // Parse the code from the url input
+        let code = spotify
+            .parse_response_code(&url_input)
+            .context("Failed parsing response code from url")?;
+
+        // Request the tokens using the code
         spotify
-            .prompt_for_token(&url)
+            .request_token(&code)
             .await
-            .context("Failed getting auth tokens")?;
+            .context("Failed requesting token")?;
+
+        // Write the token to cache file
+        spotify
+            .write_token_cache()
+            .await
+            .context("Failed caching the token")?;
 
         Ok(SpotifyPlayer::new(spotify))
     }
