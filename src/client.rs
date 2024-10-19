@@ -1,25 +1,37 @@
-use anyhow::{Context, Result};
+use std::time::Duration;
+
+use anyhow::{anyhow, Context, Result};
 use rspotify::{
     model::{
-        AdditionalType, CurrentPlaybackContext, PlayableItem, RepeatState, SearchResult, SearchType,
+        AdditionalType, CurrentPlaybackContext, Device, PlayableItem, RepeatState, SearchResult,
+        SearchType,
     },
     prelude::{BaseClient, OAuthClient},
     AuthCodePkceSpotify,
 };
 
-use crate::model::{Playable, Track};
+use crate::{
+    model::{Playable, Track},
+    ui,
+};
 
 // Used to control the spotify player
 pub struct SpotifyPlayer {
     client: AuthCodePkceSpotify,
+    playback_device: Option<Device>,
 }
 
 impl SpotifyPlayer {
     pub fn new(client: AuthCodePkceSpotify) -> Self {
-        Self { client }
+        Self {
+            client,
+            playback_device: None,
+        }
     }
 
-    pub async fn current_track(&self) -> Result<Option<Track>> {
+    pub async fn current_track(&mut self) -> Result<Option<Track>> {
+        self.ensure_playback_device().await?;
+
         let currently_playing = self
             .client
             .current_playing(None, None::<Option<&AdditionalType>>)
@@ -44,7 +56,9 @@ impl SpotifyPlayer {
         };
     }
 
-    pub async fn playback_pause(&self) -> Result<()> {
+    pub async fn playback_pause(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         let current_playback = self.playback_state().await?;
 
         if current_playback.is_playing {
@@ -57,7 +71,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn playback_resume(&self) -> Result<()> {
+    pub async fn playback_resume(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         let current_playback = self.playback_state().await?;
 
         if !current_playback.is_playing {
@@ -70,7 +86,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn playback_toggle(&self) -> Result<()> {
+    pub async fn playback_toggle(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         let current_playback = self.playback_state().await?;
 
         if current_playback.is_playing {
@@ -82,7 +100,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn volume_get(&self) -> Result<u8> {
+    pub async fn volume_get(&mut self) -> Result<u8> {
+        self.ensure_playback_device().await?;
+
         let current_playback = self.playback_state().await?;
 
         Ok(current_playback
@@ -91,7 +111,9 @@ impl SpotifyPlayer {
             .context("No current volume")? as u8)
     }
 
-    pub async fn volume_set(&self, volume: u8) -> Result<()> {
+    pub async fn volume_set(&mut self, volume: u8) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .volume(volume.clamp(0, 100), None)
             .await
@@ -100,7 +122,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn volume_up(&self, up: u8) -> Result<()> {
+    pub async fn volume_up(&mut self, up: u8) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         let volume = self.volume_get().await?;
 
         self.volume_set(volume + up).await?;
@@ -108,7 +132,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn volume_down(&self, down: u8) -> Result<()> {
+    pub async fn volume_down(&mut self, down: u8) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         let volume = self.volume_get().await?;
 
         self.volume_set(volume - down).await?;
@@ -117,11 +143,13 @@ impl SpotifyPlayer {
     }
 
     pub async fn search(
-        &self,
+        &mut self,
         query: String,
         search_type: SearchType,
         limit: Option<u32>,
     ) -> Result<Vec<Box<dyn Playable + 'static>>> {
+        self.ensure_playback_device().await?;
+
         let search = self
             .client
             .search(&query, search_type, None, None, limit, None)
@@ -149,7 +177,9 @@ impl SpotifyPlayer {
         Ok(results)
     }
 
-    pub async fn play(&self, item: &Box<dyn Playable>) -> Result<()> {
+    pub async fn play(&mut self, item: &Box<dyn Playable>) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         item.play(&self.client)
             .await
             .context("Failed playing item")?;
@@ -157,7 +187,54 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn song_next(&self) -> Result<()> {
+    pub async fn set_device(&mut self, device: Device) -> Result<()> {
+        self.client
+            .transfer_playback(
+                device
+                    .id
+                    .clone()
+                    .context("Playback device is missing ID")?
+                    .as_str(),
+                None,
+            )
+            .await
+            .context("Failed setting playback device")?;
+
+        //  FIXME: Because of the nature of async, the runtime executes the next task
+        //  while the transfer_playback() function is waiting for a response from the
+        //  spotify API, confirming the playback device to be updated. This causes code
+        //  to be executed, before the playback device was set. To avoid this, we wait
+        //  for a second to give the spotify API enough time to update the playback device.
+        //  This is a horrible, temporary solution, but I couldn't figure out how to fix
+        //  this properly. And stop myself from going insane, I will leave it like this
+        //  for the time being.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        self.playback_device = Some(device);
+
+        Ok(())
+    }
+
+    pub async fn select_device(&mut self, devices: Option<Vec<Device>>) -> Result<()> {
+        let devices = match devices {
+            Some(d) => d,
+            None => self
+                .client
+                .device()
+                .await
+                .context("Failed getting available playback devices")?,
+        };
+
+        match devices.len() {
+            0 => Err(anyhow!("No devices are available")
+                .context("Please make sure you are running a Spotify client")),
+            _ => self.set_device(ui::select_device(devices)?).await,
+        }
+    }
+
+    pub async fn song_next(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .next_track(None)
             .await
@@ -166,7 +243,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn song_prev(&self) -> Result<()> {
+    pub async fn song_prev(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .previous_track(None)
             .await
@@ -175,7 +254,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn shuffle_on(&self) -> Result<()> {
+    pub async fn shuffle_on(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .shuffle(true, None)
             .await
@@ -184,7 +265,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn shuffle_off(&self) -> Result<()> {
+    pub async fn shuffle_off(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .shuffle(false, None)
             .await
@@ -193,7 +276,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn shuffle_toggle(&self) -> Result<()> {
+    pub async fn shuffle_toggle(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         let current_playback = self.playback_state().await?;
 
         if current_playback.shuffle_state {
@@ -205,7 +290,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn repeat_on(&self) -> Result<()> {
+    pub async fn repeat_on(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .repeat(RepeatState::Context, None)
             .await
@@ -214,7 +301,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn repeat_off(&self) -> Result<()> {
+    pub async fn repeat_off(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .repeat(RepeatState::Off, None)
             .await
@@ -223,7 +312,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn repeat_track(&self) -> Result<()> {
+    pub async fn repeat_track(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         self.client
             .repeat(RepeatState::Track, None)
             .await
@@ -232,7 +323,9 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    pub async fn repeat_toggle(&self) -> Result<()> {
+    pub async fn repeat_toggle(&mut self) -> Result<()> {
+        self.ensure_playback_device().await?;
+
         let current_playback = self.playback_state().await?;
 
         match current_playback.repeat_state {
@@ -244,14 +337,42 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    async fn playback_state(&self) -> Result<CurrentPlaybackContext> {
+    async fn playback_state(&mut self) -> Result<CurrentPlaybackContext> {
         let current_playback = self
             .client
             .current_playback(None, None::<Option<&AdditionalType>>)
             .await
-            .context("Failed getting current playback state")?
-            .context("No current playback")?;
+            .context("Failed determining current playback state")?
+            .context("No current playback device")?;
 
         Ok(current_playback)
+    }
+
+    async fn ensure_playback_device(&mut self) -> Result<()> {
+        let playback_context = self
+            .client
+            .current_playback(None, None::<Option<&AdditionalType>>)
+            .await
+            .context("Failed determining current playback state")?;
+
+        if let Some(playback) = playback_context {
+            return self.set_device(playback.device).await;
+        }
+
+        let devices = self
+            .client
+            .device()
+            .await
+            .context("Failed getting available playback devices")?;
+
+        if devices.len() == 1 {
+            if let Some(device) = devices.get(0) {
+                self.set_device(device.clone()).await?;
+            }
+        } else {
+            self.select_device(Some(devices)).await?;
+        }
+
+        Ok(())
     }
 }

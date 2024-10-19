@@ -1,14 +1,28 @@
 use anyhow::{Context, Result};
 use inquire::{Password, PasswordDisplayMode, Select, Text};
-use rspotify::Credentials;
+use rspotify::{model::Device, Credentials};
 
-use crate::model::Playable;
+use crate::model::{DisplayableDevice, Playable};
 
 /// Select a playable item from a list and return it
-pub fn select_playable(content_list: Vec<Box<dyn Playable>>) -> Result<Box<dyn Playable>> {
-    Select::new("Select an item to play", content_list)
+pub fn select_playable(playables: Vec<Box<dyn Playable>>) -> Result<Box<dyn Playable>> {
+    Select::new("Select an item to play", playables)
         .prompt()
-        .context("Failed displaying content selection")
+        .context("Failed to select a playable item")
+}
+
+/// Display a selection prompt for playback devices
+pub fn select_device(devices: Vec<Device>) -> Result<Device> {
+    let devices = devices
+        .into_iter()
+        .map(|device| DisplayableDevice { device })
+        .collect();
+
+    let selected_device = Select::new("Select a playback device", devices)
+        .prompt()
+        .context("Failed selecting a playback device")?;
+
+    Ok(selected_device.device)
 }
 
 /// Collect client id and client secrets

@@ -35,7 +35,7 @@ pub async fn parse() -> Result<()> {
     // Get a SpotifyPlayer instance for controlling, run auth flow in case user is not authorized
     // yet
 
-    let player = match auth::load_cached().await? {
+    let mut player = match auth::load_cached().await? {
         Some(player) => player,
         None => auth::run_flow().await?,
     };
@@ -104,6 +104,10 @@ pub async fn parse() -> Result<()> {
                 return player.play(&selected).await;
             }
         }
+    }
+
+    if let Some(_) = matches.subcommand_matches("device") {
+        return player.select_device(None).await;
     }
 
     if let Some(_) = matches.subcommand_matches("next") {
@@ -271,6 +275,11 @@ fn command() -> Command {
                         .action(ArgAction::Set),
                 ])
                 .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("device")
+                .about("Select a playback device")
+                .alias("de"),
         )
         .subcommand(Command::new("next").about("Skip current track").alias("ne"))
         .subcommand(

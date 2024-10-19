@@ -7,8 +7,8 @@ use std::{
 use anyhow::{Context, Result};
 use rspotify::{
     model::{
-        FullArtist, FullTrack, PlayContextId, PlayableId, SimplifiedAlbum, SimplifiedEpisode,
-        SimplifiedPlaylist, SimplifiedShow,
+        Device, FullArtist, FullTrack, PlayContextId, PlayableId, SimplifiedAlbum,
+        SimplifiedEpisode, SimplifiedPlaylist, SimplifiedShow,
     },
     prelude::OAuthClient,
     AuthCodePkceSpotify,
@@ -18,6 +18,16 @@ use rspotify::{
 pub struct Track {
     pub title: String,
     pub by: Vec<String>,
+}
+
+pub struct DisplayableDevice {
+    pub device: Device,
+}
+
+impl Display for DisplayableDevice {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.device.name)
+    }
 }
 
 pub trait Playable {
