@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use rspotify::{
@@ -15,22 +15,45 @@ use crate::{
     ui,
 };
 
+const DEVICE_CACHE_VALIDITY: Duration = Duration::from_secs(3);
+
+// Struct for caching the current playback device
+struct CachedDevice {
+    _device: Device, // We currently don't need the device, but no reason to not save it
+    last_checked: Instant,
+    valid_for: Duration,
+}
+
+impl CachedDevice {
+    fn new(device: Device) -> Self {
+        Self {
+            _device: device,
+            last_checked: Instant::now(),
+            valid_for: DEVICE_CACHE_VALIDITY,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.last_checked.elapsed() < self.valid_for
+    }
+}
+
 // Used to control the spotify player
 pub struct SpotifyPlayer {
     client: AuthCodePkceSpotify,
-    playback_device: Option<Device>,
+    cached_device: Option<CachedDevice>,
 }
 
 impl SpotifyPlayer {
     pub fn new(client: AuthCodePkceSpotify) -> Self {
         Self {
             client,
-            playback_device: None,
+            cached_device: None,
         }
     }
 
     pub async fn current_track(&mut self) -> Result<Option<Track>> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         let currently_playing = self
             .client
@@ -57,9 +80,9 @@ impl SpotifyPlayer {
     }
 
     pub async fn playback_pause(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
-        let current_playback = self.playback_state().await?;
+        let current_playback = self.playback_context().await?;
 
         if current_playback.is_playing {
             self.client
@@ -72,9 +95,9 @@ impl SpotifyPlayer {
     }
 
     pub async fn playback_resume(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
-        let current_playback = self.playback_state().await?;
+        let current_playback = self.playback_context().await?;
 
         if !current_playback.is_playing {
             self.client
@@ -87,23 +110,23 @@ impl SpotifyPlayer {
     }
 
     pub async fn playback_toggle(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
-        let current_playback = self.playback_state().await?;
+        let current_playback = self.playback_context().await?;
 
-        if current_playback.is_playing {
-            self.playback_pause().await?;
-        } else {
-            self.playback_resume().await?;
+        match current_playback.is_playing {
+            true => self.client.pause_playback(None).await,
+            false => self.client.resume_playback(None, None).await,
         }
+        .context("Failed toggling playback")?;
 
         Ok(())
     }
 
     pub async fn volume_get(&mut self) -> Result<u8> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
-        let current_playback = self.playback_state().await?;
+        let current_playback = self.playback_context().await?;
 
         Ok(current_playback
             .device
@@ -112,7 +135,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn volume_set(&mut self, volume: u8) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .volume(volume.clamp(0, 100), None)
@@ -123,7 +146,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn volume_up(&mut self, up: u8) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         let volume = self.volume_get().await?;
 
@@ -133,7 +156,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn volume_down(&mut self, down: u8) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         let volume = self.volume_get().await?;
 
@@ -148,7 +171,7 @@ impl SpotifyPlayer {
         search_type: SearchType,
         limit: Option<u32>,
     ) -> Result<Vec<Box<dyn Playable + 'static>>> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         let search = self
             .client
@@ -178,7 +201,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn play(&mut self, item: &Box<dyn Playable>) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         item.play(&self.client)
             .await
@@ -200,17 +223,33 @@ impl SpotifyPlayer {
             .await
             .context("Failed setting playback device")?;
 
-        //  FIXME: Because of the nature of async, the runtime executes the next task
-        //  while the transfer_playback() function is waiting for a response from the
-        //  spotify API, confirming the playback device to be updated. This causes code
-        //  to be executed, before the playback device was set. To avoid this, we wait
-        //  for a second to give the spotify API enough time to update the playback device.
-        //  This is a horrible, temporary solution, but I couldn't figure out how to fix
-        //  this properly. And stop myself from going insane, I will leave it like this
-        //  for the time being.
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Unfortunately the spotify API does not tell us,
+        // when the device has finished updating. That means, we have to poll
+        // for device changes, great, I know
 
-        self.playback_device = Some(device);
+        const MAX_WAIT_TIME: Duration = Duration::from_secs(1);
+        const POLL_INTERVAL: Duration = Duration::from_millis(100);
+        let start_time = Instant::now();
+
+        // Poll until the device is confirmed or we exceed the timeout
+        loop {
+            if start_time.elapsed() < MAX_WAIT_TIME {
+                if let Ok(Some(current_playback)) = self
+                    .client
+                    .current_playback(None, None::<Option<&AdditionalType>>)
+                    .await
+                {
+                    if current_playback.device.name == device.name {
+                        self.cached_device = Some(CachedDevice::new(device));
+                        break;
+                    }
+                }
+
+                tokio::time::sleep(POLL_INTERVAL).await;
+            } else {
+                return Err(anyhow!("Timed out while setting a playback device"));
+            }
+        }
 
         Ok(())
     }
@@ -233,7 +272,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn song_next(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .next_track(None)
@@ -244,7 +283,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn song_prev(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .previous_track(None)
@@ -255,7 +294,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn shuffle_on(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .shuffle(true, None)
@@ -266,7 +305,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn shuffle_off(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .shuffle(false, None)
@@ -277,9 +316,9 @@ impl SpotifyPlayer {
     }
 
     pub async fn shuffle_toggle(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
-        let current_playback = self.playback_state().await?;
+        let current_playback = self.playback_context().await?;
 
         if current_playback.shuffle_state {
             self.shuffle_off().await?;
@@ -291,7 +330,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn repeat_on(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .repeat(RepeatState::Context, None)
@@ -302,7 +341,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn repeat_off(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .repeat(RepeatState::Off, None)
@@ -313,7 +352,7 @@ impl SpotifyPlayer {
     }
 
     pub async fn repeat_track(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
         self.client
             .repeat(RepeatState::Track, None)
@@ -324,9 +363,9 @@ impl SpotifyPlayer {
     }
 
     pub async fn repeat_toggle(&mut self) -> Result<()> {
-        self.ensure_playback_device().await?;
+        self.ensure_device().await?;
 
-        let current_playback = self.playback_state().await?;
+        let current_playback = self.playback_context().await?;
 
         match current_playback.repeat_state {
             RepeatState::Off => self.repeat_on().await?,
@@ -337,7 +376,7 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    async fn playback_state(&mut self) -> Result<CurrentPlaybackContext> {
+    async fn playback_context(&mut self) -> Result<CurrentPlaybackContext> {
         let current_playback = self
             .client
             .current_playback(None, None::<Option<&AdditionalType>>)
@@ -348,23 +387,36 @@ impl SpotifyPlayer {
         Ok(current_playback)
     }
 
-    async fn ensure_playback_device(&mut self) -> Result<()> {
+    async fn ensure_device(&mut self) -> Result<()> {
+        // Do we have a cache
+        if let Some(cached) = &self.cached_device {
+            // Is the cache valid? If yes we return.
+            if cached.is_valid() {
+                return Ok(());
+            }
+        }
+
+        // Get the new context
         let playback_context = self
             .client
             .current_playback(None, None::<Option<&AdditionalType>>)
             .await
             .context("Failed determining current playback state")?;
 
-        if let Some(playback) = playback_context {
-            return self.set_device(playback.device).await;
+        // If we have a context, set it and return
+        if let Some(current_playback) = playback_context {
+            self.cached_device = Some(CachedDevice::new(current_playback.device));
+            return Ok(());
         }
 
+        // Otherwise select a playback device
         let devices = self
             .client
             .device()
             .await
             .context("Failed getting available playback devices")?;
 
+        // Select a device
         if devices.len() == 1 {
             if let Some(device) = devices.get(0) {
                 self.set_device(device.clone()).await?;
