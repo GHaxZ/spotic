@@ -105,10 +105,10 @@ pub async fn parse() -> Result<()> {
         }
     }
 
-    if let Some(playlist) = matches.subcommand_matches("playlist") {
+    if let Some(library) = matches.subcommand_matches("library") {
         let playlists = player.playlists().await?;
 
-        let selected_playlist = match playlist.get_one::<String>("name") {
+        let selected_playlist = match library.get_one::<String>("name") {
             Some(filter) => playlists.into_iter().find(|p| {
                 p.to_display()
                     .to_lowercase()
@@ -119,7 +119,7 @@ pub async fn parse() -> Result<()> {
 
         match selected_playlist {
             Some(p) => player.play(&p).await?,
-            None => println!("No matchin playlist found"),
+            None => println!("No matching library playlist found"),
         }
 
         return Ok(());
@@ -194,7 +194,7 @@ fn command() -> Command {
         .subcommand(
             Command::new("play")
                 .about("Play first matching content")
-                .alias("py")
+                .alias("pl")
                 .group(ArgGroup::new("type").required(true).multiple(false))
                 .args([
                     Arg::new("track")
@@ -222,12 +222,12 @@ fn command() -> Command {
                         .short('A')
                         .action(ArgAction::SetTrue),
                     Arg::new("show")
-                        .help("Play show")
+                        .help("Play shows")
                         .group("type")
                         .long("show")
                         .short('s')
                         .action(ArgAction::SetTrue),
-                    Arg::new("episode")
+                    Arg::new("episodes")
                         .help("Play episode")
                         .group("type")
                         .long("episode")
@@ -277,13 +277,13 @@ fn command() -> Command {
                         .short('A')
                         .action(ArgAction::SetTrue),
                     Arg::new("show")
-                        .help("Search for show")
+                        .help("Search for shows")
                         .group("type")
                         .long("show")
                         .short('s')
                         .action(ArgAction::SetTrue),
                     Arg::new("episode")
-                        .help("Search for episode")
+                        .help("Search for episodes")
                         .group("type")
                         .long("episode")
                         .short('e')
@@ -296,12 +296,14 @@ fn command() -> Command {
                 .arg_required_else_help(true),
         )
         .subcommand(
-            Command::new("playlist")
-                .about("Play playlists from users library")
-                .alias("pl")
-                .after_help("Displays selection from all user playlists, if no name is provided.")
+            Command::new("library")
+                .about("Play playlist from users library")
+                .alias("li")
+                .after_help(
+                    "Displays selection from all playlists from library, if no name is specified",
+                )
                 .args([Arg::new("name")
-                    .help("Play first playlist matching this name (optional)")
+                    .help("Play first playlist from library matching this name (optional)")
                     .required(false)
                     .action(ArgAction::Set)]),
         )
@@ -322,7 +324,7 @@ fn command() -> Command {
                 .alias("sh")
                 .after_help("Toggles between on/off if no mode is supplied")
                 .args([Arg::new("mode")
-                    .help("The mode of shuffle [on | off] (optional)")
+                    .help("The shuffle mode [on | off] (optional)")
                     .required(false)
                     .action(ArgAction::Set)
                     .value_parser(shuffle_parser)]),
@@ -333,7 +335,7 @@ fn command() -> Command {
                 .alias("rp")
                 .after_help("Toggles between on/off if no mode is supplied")
                 .args([Arg::new("mode")
-                    .help("The mode of repeat [on | off | track] (optional)")
+                    .help("The repeat mode [on | off | track] (optional)")
                     .required(false)
                     .action(ArgAction::Set)
                     .value_parser(repeat_parser)]),

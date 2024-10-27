@@ -137,6 +137,8 @@ impl SpotifyPlayer {
     pub async fn volume_set(&mut self, volume: u8) -> Result<()> {
         self.ensure_device().await?;
 
+        println!("Setting to {}", volume.clamp(0, 100));
+
         self.client
             .volume(volume.clamp(0, 100), None)
             .await
@@ -150,7 +152,7 @@ impl SpotifyPlayer {
 
         let volume = self.volume_get().await?;
 
-        self.volume_set(volume + up).await?;
+        self.volume_set(volume + up.min(100 - volume)).await?;
 
         Ok(())
     }
@@ -160,7 +162,7 @@ impl SpotifyPlayer {
 
         let volume = self.volume_get().await?;
 
-        self.volume_set(volume - down).await?;
+        self.volume_set(volume - down.min(volume)).await?;
 
         Ok(())
     }

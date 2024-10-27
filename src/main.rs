@@ -7,8 +7,9 @@ mod model;
 mod ui;
 
 //  TODO:
-//  Add configuration support for current song formatting etc.
-//  Output current song ascii cover art
+//  Add configuration support for current song formatting, silent mode etc.
+//  Output current song ASCII cover art
+//  Make "device" command work the same way as the "playlist" command
 
 #[tokio::main]
 async fn main() -> Result<()> {
