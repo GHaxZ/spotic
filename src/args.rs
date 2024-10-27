@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use rspotify::model::SearchType;
 
@@ -98,12 +98,31 @@ pub async fn parse() -> Result<()> {
                     .search(query.clone(), search_type, Some(*count))
                     .await?;
 
-                let selected =
-                    ui::select_playable(res).context("Failed selecting a playable item")?;
+                let selected = ui::select_playable(res)?;
 
                 return player.play(&selected).await;
             }
         }
+    }
+
+    if let Some(playlist) = matches.subcommand_matches("playlist") {
+        let playlists = player.playlists().await?;
+
+        let selected_playlist = match playlist.get_one::<String>("name") {
+            Some(filter) => playlists.into_iter().find(|p| {
+                p.to_display()
+                    .to_lowercase()
+                    .contains(&filter.to_lowercase())
+            }),
+            None => Some(ui::select_playable(playlists)?),
+        };
+
+        match selected_playlist {
+            Some(p) => player.play(&p).await?,
+            None => println!("No matchin playlist found"),
+        }
+
+        return Ok(());
     }
 
     if let Some(_) = matches.subcommand_matches("device") {
@@ -175,7 +194,7 @@ fn command() -> Command {
         .subcommand(
             Command::new("play")
                 .about("Play first matching content")
-                .alias("pl")
+                .alias("py")
                 .group(ArgGroup::new("type").required(true).multiple(false))
                 .args([
                     Arg::new("track")
@@ -275,6 +294,16 @@ fn command() -> Command {
                         .action(ArgAction::Set),
                 ])
                 .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("playlist")
+                .about("Play playlists from users library")
+                .alias("pl")
+                .after_help("Displays selection from all user playlists, if no name is provided.")
+                .args([Arg::new("name")
+                    .help("Play first playlist matching this name (optional)")
+                    .required(false)
+                    .action(ArgAction::Set)]),
         )
         .subcommand(
             Command::new("device")

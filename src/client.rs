@@ -210,6 +210,23 @@ impl SpotifyPlayer {
         Ok(())
     }
 
+    // Get all user playlists
+    pub async fn playlists(&mut self) -> Result<Vec<Box<dyn Playable + 'static>>> {
+        let playlists = self
+            .client
+            .current_user_playlists_manual(None, None)
+            .await
+            .context("Failed getting users playlists")?
+            .items;
+
+        let playables = playlists
+            .into_iter()
+            .map(|item| Box::new(item) as Box<dyn Playable>)
+            .collect();
+
+        Ok(playables)
+    }
+
     pub async fn set_device(&mut self, device: Device) -> Result<()> {
         self.client
             .transfer_playback(
