@@ -24,6 +24,7 @@ enum RepeatOperation {
     Track,
 }
 
+/// Parse the command line arguments
 pub async fn parse() -> Result<()> {
     let matches = command().get_matches();
 
@@ -32,9 +33,7 @@ pub async fn parse() -> Result<()> {
         return Ok(());
     }
 
-    // Get a SpotifyPlayer instance for controlling, run auth flow in case user is not authorized
-    // yet
-
+    // Get SpotifyPlayer instance, run auth flow if user is unauthorized
     let mut player = match auth::load_cached().await? {
         Some(player) => player,
         None => auth::run_flow().await?,
@@ -130,11 +129,11 @@ pub async fn parse() -> Result<()> {
     }
 
     if let Some(_) = matches.subcommand_matches("next") {
-        return player.song_next().await;
+        return player.track_next().await;
     }
 
     if let Some(_) = matches.subcommand_matches("prev") {
-        return player.song_prev().await;
+        return player.track_prev().await;
     }
 
     if let Some(shuffle) = matches.subcommand_matches("shuffle") {
@@ -161,6 +160,7 @@ pub async fn parse() -> Result<()> {
     Ok(())
 }
 
+/// Get the settings for command parsing
 fn command() -> Command {
     Command::new("sc")
         .version(env!("CARGO_PKG_VERSION"))
@@ -348,6 +348,7 @@ fn command() -> Command {
             .action(ArgAction::SetTrue)])
 }
 
+/// A custom parser for volume arguments
 fn volume_parser(arg: &str) -> Result<VolumeOperation, String> {
     fn parse_num(str: &str) -> Result<u8, String> {
         let num = str
@@ -383,6 +384,7 @@ fn volume_parser(arg: &str) -> Result<VolumeOperation, String> {
     return Ok(VolumeOperation::Set(parse_num(arg)?));
 }
 
+/// A custon parser for shuffle arguments
 fn shuffle_parser(arg: &str) -> Result<ShuffleOperation, String> {
     match arg.to_lowercase().as_str() {
         "on" => Ok(ShuffleOperation::On),
@@ -391,6 +393,7 @@ fn shuffle_parser(arg: &str) -> Result<ShuffleOperation, String> {
     }
 }
 
+/// A custon parser for repeat arguments
 fn repeat_parser(arg: &str) -> Result<RepeatOperation, String> {
     match arg.to_lowercase().as_str() {
         "on" => Ok(RepeatOperation::On),
@@ -400,6 +403,7 @@ fn repeat_parser(arg: &str) -> Result<RepeatOperation, String> {
     }
 }
 
+/// Get the SearchType from argument matches
 fn type_matches(matches: &ArgMatches) -> Option<SearchType> {
     if matches.get_flag("track") {
         Some(SearchType::Track)
