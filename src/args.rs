@@ -4,6 +4,7 @@ use rspotify::model::SearchType;
 
 use crate::{auth, ui};
 
+/// Describes a volume operation either increase, decrease or set.
 #[derive(Clone)]
 enum VolumeOperation {
     Increase(u8),
@@ -11,12 +12,14 @@ enum VolumeOperation {
     Set(u8),
 }
 
+/// Describes a shuffle operation either on or off.
 #[derive(Clone)]
 enum ShuffleOperation {
     On,
     Off,
 }
 
+/// Describes a repeat operation either on, off or track.
 #[derive(Clone)]
 enum RepeatOperation {
     On,
@@ -241,7 +244,7 @@ fn command() -> Command {
                         .long("show")
                         .short('s')
                         .action(ArgAction::SetTrue),
-                    Arg::new("episodes")
+                    Arg::new("episode")
                         .help("Play episode")
                         .group("type")
                         .long("episode")
