@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use inquire::{Password, PasswordDisplayMode, Select, Text};
 use rspotify::{model::Device, Credentials};
 
@@ -13,10 +13,15 @@ pub fn select_playable(playables: Vec<Box<dyn Playable>>) -> Result<Box<dyn Play
 
 /// Display a selection prompt for playback devices
 pub fn select_device(devices: Vec<Device>) -> Result<Device> {
-    let devices = devices
+    let devices: Vec<DisplayableDevice> = devices
         .into_iter()
         .map(|device| DisplayableDevice { device })
         .collect();
+
+    if devices.len() == 0 {
+        return Err(anyhow!("No playback devices available")
+            .context("Please make sure you are running a Spotify client"));
+    }
 
     let selected_device = Select::new("Select a playback device", devices)
         .prompt()

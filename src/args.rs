@@ -124,8 +124,22 @@ pub async fn parse() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(_) = matches.subcommand_matches("device") {
-        return player.select_device(None).await;
+    if let Some(device) = matches.subcommand_matches("device") {
+        let devices = player.devices().await?;
+
+        let selected_device = match device.get_one::<String>("name") {
+            Some(filter) => devices
+                .into_iter()
+                .find(|d| d.name.to_lowercase().contains(&filter.to_lowercase())),
+            None => Some(ui::select_device(devices)?),
+        };
+
+        match selected_device {
+            Some(d) => player.set_device(d).await?,
+            None => println!("No matching playback device found"),
+        }
+
+        return Ok(());
     }
 
     if let Some(_) = matches.subcommand_matches("next") {
@@ -310,7 +324,14 @@ fn command() -> Command {
         .subcommand(
             Command::new("device")
                 .about("Select a playback device")
-                .alias("de"),
+                .alias("de")
+                .after_help(
+                    "Displays selection from all available playback devices, if no name is specified",
+                )
+                .args([Arg::new("name")
+                    .help("Selects first available playback device matching this name (optional)")
+                    .required(false)
+                    .action(ArgAction::Set)]),
         )
         .subcommand(Command::new("next").about("Skip current track").alias("ne"))
         .subcommand(

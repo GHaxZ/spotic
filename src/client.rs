@@ -144,8 +144,6 @@ impl SpotifyPlayer {
     pub async fn volume_set(&mut self, volume: u8) -> Result<()> {
         self.ensure_device().await?;
 
-        println!("Setting to {}", volume.clamp(0, 100));
-
         self.client
             .volume(volume.clamp(0, 100), None)
             .await
@@ -284,22 +282,15 @@ impl SpotifyPlayer {
         Ok(())
     }
 
-    /// Select a playback device
-    pub async fn select_device(&mut self, devices: Option<Vec<Device>>) -> Result<()> {
-        let devices = match devices {
-            Some(d) => d,
-            None => self
-                .client
-                .device()
-                .await
-                .context("Failed getting available playback devices")?,
-        };
+    /// Get all available playback devices
+    pub async fn devices(&self) -> Result<Vec<Device>> {
+        let devices = self
+            .client
+            .device()
+            .await
+            .context("Failed getting available playback devices")?;
 
-        match devices.len() {
-            0 => Err(anyhow!("No devices are available")
-                .context("Please make sure you are running a Spotify client")),
-            _ => self.set_device(ui::select_device(devices)?).await,
-        }
+        Ok(devices)
     }
 
     /// Skip the current track
@@ -447,19 +438,14 @@ impl SpotifyPlayer {
             return Ok(());
         }
 
-        let devices = self
-            .client
-            .device()
-            .await
-            .context("Failed getting available playback devices")?;
+        let devices = self.devices().await?;
 
-        if devices.len() == 1 {
-            if let Some(device) = devices.get(0) {
-                self.set_device(device.clone()).await?;
-            }
-        } else {
-            self.select_device(Some(devices)).await?;
-        }
+        let device = match devices.len() {
+            1 => devices.into_iter().next().unwrap(),
+            _ => ui::select_device(devices)?,
+        };
+
+        self.set_device(device).await?;
 
         Ok(())
     }
